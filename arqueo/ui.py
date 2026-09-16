@@ -1,17 +1,14 @@
-"""UI editorial standalone con navegación por estratos (pestañas).
+"""UI editorial standalone con selector de comunidad (HTML + ECharts vendorizado).
 
-Pieza de investigación en papel ("Arqueología Web"). Secciones = estratos (pestañas);
-gráficos = figuras numeradas con pie. Color como tesis: 2012 teal (pasado frío),
-2022 terracota (presente cálido). Los léxicos de estilo/psicológicos van normalizados
-por mil palabras (robustos a la longitud). Cuantitativo sobre el corpus (bots filtrados);
-cualitativo sobre una muestra 20+20 leída a mano.
+Un solo archivo que embebe los datos de TODAS las comunidades presentes; un
+desplegable cambia entre ellas y el informe se re-renderiza. Secciones = estratos
+(menú lateral / hamburguesa). Color como tesis: 2012 azul, 2022 rojo (Economist).
 
-    python -m arqueo.ui            # -> data/ui.html
+    python -m arqueo.cli ui      # -> data/ui.html  (todas las comunidades)
 """
 from __future__ import annotations
 import json
 import os
-import re
 
 from .analyze import log_odds
 from .dashboard import load, by_era, style, LEXICONS
@@ -21,9 +18,10 @@ from .deep import (group_pct, group_rate, pair, complexity, tense, formatting, t
                    TOPICS, ENTITIES, COGNITION, EXPRESSION, VALUES, AFFECT, EMOTION, COGPROC, BIG5)
 from .sig import battery
 
-C12, C22 = "#006BA2", "#E3120B"   # azul / rojo Economist
+C12, C22 = "#006BA2", "#E3120B"
 
 BOT_AUTHORS = {"AutoModerator", "autotldr", "politicsmoderatorbot", "totesmessenger"}
+import re
 BOT_MARK = re.compile(r"i am a bot|please contact|message compose|has been removed|"
                       r"your (comment|submission)|moderators of|beep boop", re.I)
 
@@ -52,16 +50,15 @@ QUOTES = {
         ("Michigander_from_Oz", "Contraejemplo profundo", "The 'No Surprise Billing' rules… the arbiter presumes the insurance company's rate is correct, and the physician must prove otherwise…"),
     ],
 }
-LEAD = ("En una década, r/politics deja de ser un <em>foro deliberativo</em> —citar leyes, "
-        "conceder puntos, discutir el debido proceso— y se vuelve un <em>muro expresivo</em>: "
-        "dunk, ironía, identidad, moral tribal, slang y afecto. Lo que sigue es esa transición, "
-        "leída en nueve estratos: de <strong>argumentar para convencer</strong> a "
-        "<strong>expresar para pertenecer</strong>.")
+LEAD = ("Comparamos tres comunidades de Reddit —<em>política, economía y tecnología</em>— entre 2012 y 2022. "
+        "El hallazgo es sobrio: la <strong>forma</strong> de escribir apenas cambió en ninguna, con efectos "
+        "estadísticamente triviales. Lo que más cambió —la <strong>agenda</strong>, de quién y de qué se habla— "
+        "está <strong>concentrado en política</strong>. La gente no se volvió otra; cambió el tema, y en todas "
+        "partes se grita un poco menos.")
 METHOD = (
-    "<h3>Datos</h3><p>Comentarios de <code>r/politics</code> descargados de la API pública de "
-    "Arctic Shift (sucesor de Pushshift). Dos cortes: primer trimestre de 2012 y de 2022, con "
-    "muestreo mensual estratificado. Tras filtrar bots y avisos de moderación quedan 3.772 "
-    "comentarios en 2012 y 5.333 en 2022.</p>"
+    "<h3>Datos</h3><p>Comentarios de <code>r/politics</code>, <code>r/Economics</code> y <code>r/technology</code> "
+    "descargados de la API pública de Arctic Shift (sucesor de Pushshift). Dos cortes por comunidad: 2012 y 2022, "
+    "con muestreo mensual estratificado (~2.000/mes) y filtrado de bots y avisos de moderación.</p>"
     "<h3>Preprocesamiento</h3><ul>"
     "<li>Normalización a un esquema común; limpieza de citas y firmas.</li>"
     "<li>Exclusión de autores bot (AutoModerator, etc.) y de plantillas de moderación.</li>"
@@ -74,23 +71,15 @@ METHOD = (
     "<li>Proporciones: <b>z de dos proporciones</b> con IC 95% y tamaño de efecto <b>Cohen's h</b>.</li>"
     "<li>Continuas: <b>Mann-Whitney U</b> (aprox. normal, corrección por empates) y <b>Cliff's δ</b>.</li>"
     "<li>Comparaciones múltiples: corrección <b>Benjamini-Hochberg (FDR)</b>.</li>"
-    "<li>Con n≈9.000 casi todo sale significativo: el veredicto lo decide el <b>tamaño de efecto</b>.</li></ul>"
+    "<li>Con n grande (~40k por comunidad) casi todo sale significativo: el veredicto lo decide el <b>tamaño de efecto</b>.</li></ul>"
     "<h3>Límites</h3><ul>"
-    "<li>Una sola comunidad y solo el primer trimestre: <b>descriptivo, no causal</b>.</li>"
+    "<li>Tres comunidades y dos cortes anuales: <b>descriptivo, no causal</b>.</li>"
     "<li>Confusores no controlados: plataforma, composición de la población y agenda noticiosa.</li>"
     "<li>Léxicos ilustrativos; el «Big Five» es un <b>proxy léxico</b>, no un instrumento validado.</li>"
-    "<li>Comparar 2012 vs 2022 mezcla <i>época</i> con <i>quién estaba online</i>.</li></ul>")
+    "<li>La lectura cualitativa (Coda) es solo de <b>r/politics</b>; no se repitió por comunidad.</li></ul>")
 
 
-def build(glob_pat="data/normalized/**/*.jsonl", out="data/ui.html"):
-    rows = load(glob_pat)
-    if not rows:
-        raise SystemExit("No hay JSONL normalizado. Corre 'ingest' primero.")
-    eras = {e: humans(r) for e, r in by_era(rows).items()}
-    ks = list(eras)
-    a, b = ks[0], ks[-1]
-    ra, rb = eras[a], eras[b]
-
+def _payload(ra, rb, a, b, community):
     def famv(F, topn=None, rate=False):
         fn = group_rate if rate else group_pct
         A, B = fn(ra, F), fn(rb, F)
@@ -117,7 +106,7 @@ def build(glob_pat="data/normalized/**/*.jsonl", out="data/ui.html"):
     sections = [
         {"title": "De qué se hablaba", "panels": [
             P(id="terms", kind="tornado", title="El vocabulario que separa las épocas",
-              desc=f"Log-odds (z-score). Hacia {a} en teal; hacia {b} en terracota.", h=380,
+              desc=f"Log-odds (z-score). Hacia {a} en azul; hacia {b} en rojo.", h=380,
               uni=lo(None), bi=lo(bigrams), tri=lo(trigrams)),
             P(id="topics", kind="barh", unit="%", title="Temas: qué asuntos se tocaban",
               desc="% de comentarios que activan cada tema (léxicos ilustrativos).", **famv(TOPICS)),
@@ -136,13 +125,13 @@ def build(glob_pat="data/normalized/**/*.jsonl", out="data/ui.html"):
             P(id="complexity", kind="barh", title="Complejidad del texto",
               desc="Palabra larga, longitud de frase y subordinación (comas).", **pair(complexity(ra), complexity(rb))),
             P(id="readability", kind="barh", title="Legibilidad (Flesch)",
-              desc="Facilidad de lectura: mayor = más fácil. Con sus componentes.", **pair(readability(ra), readability(rb))),
+              desc="Facilidad de lectura: mayor = más fácil.", **pair(readability(ra), readability(rb))),
             P(id="tense", kind="barh", title="Orientación temporal",
               desc="Palabras de pasado frente a futuro (por mil).", **pair(tense(ra), tense(rb))),
         ]},
         {"title": "Perfil psicológico", "panels": [
             P(id="emotion", kind="barh", title="Emociones expresadas (por mil palabras)",
-              desc="Densidad de carga emocional, estilo LIWC. Normalizado por longitud.", **famv(EMOTION, rate=True)),
+              desc="Densidad de carga emocional, estilo LIWC.", **famv(EMOTION, rate=True)),
             P(id="big5", kind="radar", title="Big Five (proxy léxico, por mil palabras)",
               desc="Marcadores correlacionados; aproximado, no es instrumento validado.", **famv(BIG5, rate=True)),
             P(id="cogproc", kind="radar", title="Procesamiento cognitivo (por mil palabras)",
@@ -164,7 +153,7 @@ def build(glob_pat="data/normalized/**/*.jsonl", out="data/ui.html"):
             P(id="values", kind="barh", unit="%", title="Valores invocados",
               desc="Libertad, seguridad, igualdad, tradición, progreso, nación.", **famv(VALUES)),
             P(id="pron", kind="barh", title="Pronombres y encuadre",
-              desc="Por mil palabras. yo → individual; nosotros/ellos → endogrupo/exogrupo.", **pair(pronouns(ra), pronouns(rb))),
+              desc="Por mil palabras. yo → individual; nosotros/ellos → endo/exogrupo.", **pair(pronouns(ra), pronouns(rb))),
             P(id="affect", kind="barh", unit="%", title="Optimismo frente a pesimismo",
               desc="Afecto colectivo hacia el futuro.", **famv(AFFECT)),
             P(id="persp", kind="barh", unit="%", title="Perspectiva temática",
@@ -190,23 +179,24 @@ def build(glob_pat="data/normalized/**/*.jsonl", out="data/ui.html"):
             P(id="gini", kind="bar", title="Concentración de voz (Gini)",
               desc="0 = todos hablan por igual · 1 = una voz domina.",
               cats=["Gini"], a=[concentration(ra)["Gini de actividad"]], b=[concentration(rb)["Gini de actividad"]]),
-            P(id="mensual", kind="line", title="Estacionalidad de la muestra",
-              desc="Comentarios por mes. La muestra solo cubre el primer trimestre.",
+            P(id="mensual", kind="line", title="Estacionalidad",
+              desc="Comentarios por mes.",
               cats=[f"{m:02d}" for m in range(1, 13)], a=list(month_hist(ra).values()), b=list(month_hist(rb).values())),
         ]},
     ]
-
     sigrows = battery(ra, rb)
     sections.insert(0, {"title": "¿Hay diferencia significativa?", "panels": [
         P(id="effects", kind="effects", h=540, title="Tamaño de efecto por métrica (2012 → 2022)",
-          desc="Barra = Cohen's h (proporciones) o Cliff's δ (continuas). Sólido = efecto real; tenue = significativo pero trivial; casi transparente = no significativo (FDR). Con n≈9k casi todo da p<0.05, así que manda el efecto, no la p.",
+          desc="Barra = Cohen's h o Cliff's δ. Sólido = efecto real; tenue = significativo pero trivial; casi transparente = no significativo (FDR). Con n grande manda el efecto, no la p.",
           rows=sigrows),
         P(id="sigtable", kind="table", title="Detalle: test, p, q (FDR) y veredicto",
-          desc="z de dos proporciones (densidad/presencia) o Mann-Whitney U (continuas); corrección Benjamini-Hochberg. En negrita, los pocos efectos no triviales.",
+          desc="z de dos proporciones o Mann-Whitney U; corrección Benjamini-Hochberg. En negrita, los efectos no triviales.",
           rows=sigrows),
     ]})
-
-    data = {"meta": {"a": a, "b": b, "na": len(ra), "nb": len(rb)},
+    pa = ra[0]["platform"] if ra else ""
+    pb = rb[0]["platform"] if rb else ""
+    return {"meta": {"a": a, "b": b, "na": len(ra), "nb": len(rb), "sub": community,
+                     "pa": pa, "pb": pb, "cross": bool(pa and pb and pa != pb)},
             "cards": [
                 {"label": "Comentarios humanos", "a": len(ra), "b": len(rb)},
                 {"label": "Autores únicos", "a": concentration(ra)["autores únicos"], "b": concentration(rb)["autores únicos"]},
@@ -215,9 +205,24 @@ def build(glob_pat="data/normalized/**/*.jsonl", out="data/ui.html"):
                 {"label": "Slang (x1000 palabras)", "a": expr["a"][0], "b": expr["b"][0]},
                 {"label": "Insultos (x1000 palabras)", "a": expr["a"][1], "b": expr["b"][1]},
             ],
-            "sections": sections, "lead": LEAD, "method": METHOD,
-            "qual": {"scores": QUAL_SCORES, "quotes": QUOTES}}
-    doc = _TEMPLATE.replace("__DATA__", json.dumps(data, ensure_ascii=False))
+            "sections": sections}
+
+
+def build(glob_pat="data/normalized/**/*.jsonl", out="data/ui.html"):
+    rows = load(glob_pat)
+    if not rows:
+        raise SystemExit("No hay JSONL normalizado. Corre 'ingest' primero.")
+    present = sorted({str(r.get("community", "")) for r in rows if r.get("community")})
+    comms = [c for c in present if c.lower() == "politics"] + [c for c in present if c.lower() != "politics"]
+    by_comm = {}
+    for c in comms:
+        crows = [r for r in rows if str(r.get("community", "")) == c]
+        eras = {e: humans(r) for e, r in by_era(crows).items()}
+        ks = sorted(eras)
+        by_comm[c] = _payload(eras[ks[0]], eras[ks[-1]], ks[0], ks[-1], c)
+    payload = {"default": comms[0], "communities": comms, "byComm": by_comm,
+               "lead": LEAD, "method": METHOD, "qual": {"scores": QUAL_SCORES, "quotes": QUOTES}}
+    doc = _TEMPLATE.replace("__DATA__", json.dumps(payload, ensure_ascii=False))
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write(doc)
@@ -226,7 +231,7 @@ def build(glob_pat="data/normalized/**/*.jsonl", out="data/ui.html"):
 
 _TEMPLATE = r"""<!doctype html><html lang=es><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>Arqueología Web — r/politics, 2012 y 2022</title>
+<title>Arqueología Web — Reddit, 2012 y 2022</title>
 <script src="../vendor/echarts.min.js"></script>
 <style>
 :root{
@@ -247,7 +252,10 @@ h1{font-family:var(--serif);font-weight:600;font-size:clamp(38px,6vw,60px);line-
 .lead em{font-style:italic;color:var(--sec)}.lead strong{font-weight:600;color:var(--ink)}
 .key{display:flex;gap:22px;align-items:center;justify-content:center;margin:20px 0 4px;font-size:13px;color:var(--sec)}
 .key b{font-weight:600}.sw{display:inline-block;width:22px;height:3px;vertical-align:middle;margin-right:7px}
-.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));border-top:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink);margin:30px 0 0}
+.commsel{text-align:center;margin:18px 0 2px}
+.commsel label{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);margin-right:10px}
+.commsel select{appearance:none;-webkit-appearance:none;background:#fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11' height='7'><path d='M0 0l5.5 6.5L11 0z' fill='%23E3120B'/></svg>") no-repeat right 10px center;border:1px solid var(--ink);border-radius:0;color:var(--ink);font-family:var(--sans);font-weight:700;font-size:14px;padding:7px 32px 7px 12px;cursor:pointer}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));border-top:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink);margin:26px 0 0}
 .num{display:flex;flex-direction:column;padding:16px 18px 16px 0;border-right:1px solid var(--rule)}.num:last-child{border-right:0}
 .num .l{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--sec);line-height:1.3;min-height:2.6em}
 .num .v{font-family:var(--serif);font-size:27px;margin-top:10px;letter-spacing:-.01em;white-space:nowrap}
@@ -283,6 +291,8 @@ figure.fig{margin:0}figure.fig.wide{grid-column:1/-1}
 figure.fig h3{font-family:var(--sans);font-weight:700;font-size:16px;letter-spacing:-.01em;margin:0;line-height:1.22}
 .chart{height:300px;margin-top:6px}
 figcaption{font-size:12.5px;color:var(--sec);font-style:italic;max-width:620px;margin-top:4px}
+.tabs{float:right;margin-top:8px}.tabs button{background:transparent;color:var(--sec);border:1px solid var(--rule);padding:3px 10px;cursor:pointer;font-family:var(--sans);font-size:11px;letter-spacing:.03em;text-transform:uppercase;margin-left:5px}
+.tabs button.on{color:#fff;background:var(--c2);border-color:var(--c2)}
 .tablewrap{overflow-x:auto;margin-top:8px}
 table.stat{width:100%;border-collapse:collapse;font-size:12.5px}
 table.stat th{text-align:right;font-family:var(--sans);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sec);border-bottom:1.5px solid var(--ink);padding:7px 12px 7px 0;white-space:nowrap}
@@ -290,9 +300,6 @@ table.stat th:first-child,table.stat td:first-child{text-align:left}
 table.stat td{padding:6px 12px 6px 0;border-bottom:1px solid var(--rule);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 table.stat tr.real td{color:var(--ink)}table.stat tr.real td:first-child{font-weight:700}
 table.stat tr.triv td{color:var(--sec)}table.stat tr.ns td{color:var(--faint)}
-.tabs{float:right;margin-top:8px}.tabs button{background:transparent;color:var(--sec);border:1px solid var(--rule);
- padding:3px 10px;cursor:pointer;font-family:var(--sans);font-size:11px;letter-spacing:.03em;text-transform:uppercase;margin-left:5px}
-.tabs button.on{color:#fff;background:var(--c2);border-color:var(--c2)}
 .voices{display:grid;grid-template-columns:1fr 1fr;gap:34px 40px;margin-top:8px}
 .voices h4{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin:0 0 14px}
 .q12 h4{color:var(--c1)}.q22 h4{color:var(--c2)}
@@ -311,18 +318,20 @@ footer{margin-top:56px;border-top:1px solid var(--rule);padding-top:16px;font-si
 <div class=read>
 <div class=tab></div>
 <div class=eyebrow>Arqueología digital · un estudio diacrónico</div>
-<h1 id=h1></h1><div class=dek id=dek></div><p class=lead id=lead></p>
+<h1>Arqueología Web</h1><div class=dek id=dek></div><p class=lead id=lead></p>
 </div>
 <div class=key><span><span class=sw style="background:#006BA2"></span><b id=k1></b> · pasado</span>
 <span><span class=sw style="background:#E3120B"></span><b id=k2></b> · presente</span></div>
+<div class=commsel><label>Comunidad</label><select id=commSel aria-label="Elegir comunidad"></select></div>
 <div class=strip id=strip></div>
 <div id=sections></div>
 <footer id=foot></footer>
 </div>
 <script>
-const DATA=__DATA__;const A=DATA.meta.a,B=DATA.meta.b;
+const ALL=__DATA__;let DATA=ALL.byComm[ALL.default];
+let A=DATA.meta.a,B=DATA.meta.b;
 const P={c:['#006BA2','#E3120B'],ink:'#121212',sec:'#59636b',grid:'#e4e4e4'};
-const charts=[],tors={},secCharts={};let curList=null;
+let charts=[],tors={},secCharts={},curList=null,NSEC=DATA.sections.length;
 function mk(id){const c=echarts.init(document.getElementById(id));charts.push(c);if(curList)curList.push(c);return c;}
 const ax=()=>({axisLabel:{color:P.sec,fontSize:11},axisLine:{lineStyle:{color:P.grid}},splitLine:{lineStyle:{color:P.grid,type:'solid'}},axisTick:{show:false}});
 const TIP=()=>({backgroundColor:'#ffffff',borderColor:'#d9d9d9',textStyle:{color:P.ink}});
@@ -363,14 +372,11 @@ function tornado(p,kind){['uni','bi','tri'].forEach(k=>{const el=document.getEle
 function effects(id,rows){const o=rows.slice().reverse();const fp=x=>x<1e-3?x.toExponential(1):x.toFixed(3);
   mk(id).setOption(base({tooltip:Object.assign({trigger:'item',formatter:pt=>{const r=o[pt.dataIndex];
     return `${r.name}<br/>efecto ${(r.eff>=0?'+':'')+r.eff.toFixed(3)} · ${r.mag}<br/>${r.a}${r.unit?' '+r.unit:''} → ${r.b}<br/>p=${fp(r.p)} · q=${fp(r.q)}<br/><b>${r.verdict}</b>`;}},TIP()),
-   grid:{left:4,right:36,top:6,bottom:2,containLabel:true},
-   xAxis:Object.assign({type:'value'},ax()),
+   grid:{left:4,right:36,top:6,bottom:2,containLabel:true},xAxis:Object.assign({type:'value'},ax()),
    yAxis:Object.assign({type:'category',data:o.map(r=>r.name),axisLabel:{color:P.ink,fontSize:11}},ax()),
-   series:[{type:'bar',barMaxWidth:12,data:o.map(r=>({value:+r.eff.toFixed(3),
-     itemStyle:{color:r.eff>=0?P.c[1]:P.c[0],opacity:r.sig?(r.mag=='insignificante'?0.34:1):0.12}})),
+   series:[{type:'bar',barMaxWidth:12,data:o.map(r=>({value:+r.eff.toFixed(3),itemStyle:{color:r.eff>=0?P.c[1]:P.c[0],opacity:r.sig?(r.mag=='insignificante'?0.34:1):0.12}})),
      label:{show:true,position:'right',color:P.sec,fontSize:10,formatter:pt=>o[pt.dataIndex].mag}}]}));}
-function table(id,rows){const fp=x=>x<1e-3?x.toExponential(1):x.toFixed(3);
-  const cls=r=>r.sig?(r.mag=='insignificante'?'triv':'real'):'ns';
+function table(id,rows){const fp=x=>x<1e-3?x.toExponential(1):x.toFixed(3);const cls=r=>r.sig?(r.mag=='insignificante'?'triv':'real'):'ns';
   document.getElementById(id).innerHTML='<table class=stat><thead><tr><th>Métrica</th><th>2012</th><th>2022</th><th>Efecto</th><th>Magnitud</th><th>p</th><th>q (FDR)</th><th>Veredicto</th></tr></thead><tbody>'+
    rows.map(r=>`<tr class=${cls(r)}><td>${r.name}</td><td>${r.a}</td><td>${r.b}</td><td>${(r.eff>=0?'+':'')+r.eff.toFixed(3)}</td><td>${r.mag}</td><td>${fp(r.p)}</td><td>${fp(r.q)}</td><td>${r.verdict}</td></tr>`).join('')+'</tbody></table>';}
 window.tog=(id,kind)=>tornado(tors[id],kind);
@@ -385,55 +391,58 @@ function draw(p){
  else if(p.kind=='rank')rank(p.id,p.items,p.color);
  else if(p.kind=='tornado'){tors[p.id]=p;tornado(p,'uni');}
 }
-const NSEC=DATA.sections.length;
 function setDrawer(o){document.getElementById('drawer').classList.toggle('open',o);document.getElementById('backdrop').classList.toggle('open',o);}
 function drawSection(i){curList=secCharts[i]=[];
  if(i<NSEC)DATA.sections[i].panels.forEach(draw);
- else if(i==NSEC)radar('qual',DATA.qual.scores.cats,DATA.qual.scores['2012'],DATA.qual.scores['2022']);
+ else if(i==NSEC)radar('qual',ALL.qual.scores.cats,ALL.qual.scores['2012'],ALL.qual.scores['2022']);
  curList=null;}
 function show(i){for(let s=0;s<=NSEC+1;s++){const el=document.getElementById('sec'+s);if(el)el.style.display=s==i?'':'none';}
  const m=document.getElementById('menu');if(m)[...m.querySelectorAll('button')].forEach((b,j)=>b.classList.toggle('on',j==i));
  setDrawer(false);window.scrollTo(0,0);
  if(!secCharts[i])drawSection(i);else secCharts[i].forEach(c=>c.resize());}
-function render(){
- document.getElementById('h1').textContent='Arqueología Web';
- document.getElementById('dek').textContent=`Cómo cambió la conversación en r/politics entre ${A} y ${B}`;
- document.getElementById('lead').innerHTML=DATA.lead;
+function mount(){
+ charts=[];secCharts={};tors={};NSEC=DATA.sections.length;A=DATA.meta.a;B=DATA.meta.b;
+ const cx=DATA.meta.cross?` · ${A} (${DATA.meta.pa}) vs ${B} (${DATA.meta.pb}) — cross-platform, descriptivo`:'';
+ document.getElementById('dek').textContent=`Cómo cambió la conversación en ${DATA.meta.sub} entre ${A} y ${B}${cx}`;
  document.getElementById('k1').textContent=A;document.getElementById('k2').textContent=B;
  document.getElementById('strip').innerHTML=DATA.cards.map(c=>{const d=c.a?Math.round((c.b-c.a)/c.a*100):0;const s=d>0?'+':'';
    return `<div class=num><div class=l>${c.label}</div><div class=v><span class=a>${c.a}</span><span class=arw>→</span><span class=b>${c.b}</span></div><div class=d>${s}${d}%</div></div>`;}).join('');
  const root=document.getElementById('sections');let n=0;
- DATA.sections.forEach((sec,i)=>{
-   const s=document.createElement('section');s.className='sec';s.id='sec'+i;s.style.display='none';
-   const g=`<div class=kicker>Estrato ${String(i+1).padStart(2,'0')}</div><h2>${sec.title}</h2><hr class=srule><div class=figs>`+
-    sec.panels.map(p=>{n++;const wide=/tornado|rank|stack|effects|table/.test(p.kind)?' wide':'';
+ let html=DATA.sections.map((sec,i)=>{
+   const figs=sec.panels.map(p=>{n++;const wide=/tornado|rank|stack|effects|table/.test(p.kind)?' wide':'';
      const tabs=p.kind=='tornado'?`<div class=tabs><button id=u_${p.id} class=on onclick="tog('${p.id}','uni')">Palabras</button><button id=b_${p.id} onclick="tog('${p.id}','bi')">Bigramas</button><button id=t_${p.id} onclick="tog('${p.id}','tri')">Trigramas</button></div>`:'';
      const body=p.kind=='table'?`<div id=${p.id} class=tablewrap></div>`:`<div class=chart id=${p.id} style="height:${p.h||300}px"></div>`;
      return `<figure class="fig${wide}">${tabs}<div class=figtop><span class=fignum>Fig ${n}</span><h3>${p.title}</h3></div>${body}<figcaption>${p.desc||''}</figcaption></figure>`;
-    }).join('')+'</div>';
-   s.innerHTML=g;root.appendChild(s);
- });
- const coda=document.createElement('section');coda.className='sec';coda.id='sec'+NSEC;coda.style.display='none';
- const vq=(g,cls)=>`<div class="${cls}"><h4>${g}</h4>`+DATA.qual.quotes[g].map(q=>`<blockquote><div class=tag>${q[1]}</div><div class=txt>“${q[2]}”</div><div class=who>u/${q[0]}</div></blockquote>`).join('')+'</div>';
- coda.innerHTML=`<div class=kicker>Coda</div><h2>Lectura cualitativa</h2><hr class=srule>
-   <div class=figs><figure class="fig wide"><div class=figtop><span class=fignum>Radar</span><h3>Cómo se leen las voces (muestra 20+20, subjetivo)</h3></div>
+   }).join('');
+   return `<section class=sec id=sec${i} style="display:none"><div class=kicker>Estrato ${String(i+1).padStart(2,'0')}</div><h2>${sec.title}</h2><hr class=srule><div class=figs>${figs}</div></section>`;
+ }).join('');
+ const vq=(g,cls)=>`<div class="${cls}"><h4>${g}</h4>`+ALL.qual.quotes[g].map(q=>`<blockquote><div class=tag>${q[1]}</div><div class=txt>“${q[2]}”</div><div class=who>u/${q[0]}</div></blockquote>`).join('')+'</div>';
+ html+=`<section class=sec id=sec${NSEC} style="display:none"><div class=kicker>Coda · r/politics</div><h2>Lectura cualitativa</h2><hr class=srule>
+   <div class=figs><figure class="fig wide"><div class=figtop><span class=fignum>Radar</span><h3>Cómo se leen las voces (muestra 20+20 de r/politics, subjetivo)</h3></div>
    <div class=chart id=qual style=height:340px></div><figcaption>Valoración del autor sobre la muestra leída; no es una medida automática.</figcaption></figure></div>
-   <div class=voices>${vq('2012','q12')}${vq('2022','q22')}</div>`;
- root.appendChild(coda);
- const meth=document.createElement('section');meth.className='sec';meth.id='sec'+(NSEC+1);meth.style.display='none';
- meth.innerHTML=`<div class=kicker>Apéndice</div><h2>Metodología</h2><hr class=srule><div class=prose>${DATA.method}</div>`;
- root.appendChild(meth);
+   <div class=voices>${vq('2012','q12')}${vq('2022','q22')}</div></section>`;
+ html+=`<section class=sec id=sec${NSEC+1} style="display:none"><div class=kicker>Apéndice</div><h2>Metodología</h2><hr class=srule><div class=prose>${ALL.method}</div></section>`;
+ root.innerHTML=html;
  const labels=DATA.sections.map(s=>s.title).concat(['Coda','Metodología']);
  document.getElementById('menu').innerHTML=labels.map((t,i)=>
    (i==NSEC?'<div class=subhd>Apéndice</div>':'')+
    `<button onclick="show(${i})"><span class=n>${i<NSEC?String(i+1).padStart(2,'0'):'—'}</span><span>${t}</span></button>`).join('');
+ show(0);
+}
+function init(){
+ document.getElementById('lead').innerHTML=ALL.lead;
+ document.getElementById('k1').textContent=A;document.getElementById('k2').textContent=B;
+ document.getElementById('foot').textContent=`Cuantitativo por comunidad (bots filtrados). Cualitativo sobre una muestra 20+20 de r/politics leída a mano. Descriptivo, no causal; léxicos ilustrativos. Generado por arqueo.ui.`;
+ const cs=document.getElementById('commSel');
+ cs.innerHTML=ALL.communities.map(c=>`<option value="${c}">r/${c}</option>`).join('');
+ cs.value=ALL.default;
+ cs.onchange=e=>{DATA=ALL.byComm[e.target.value];mount();};
  document.getElementById('burger').onclick=()=>setDrawer(!document.getElementById('drawer').classList.contains('open'));
  document.getElementById('backdrop').onclick=()=>setDrawer(false);
  document.getElementById('dclose').onclick=()=>setDrawer(false);
- document.getElementById('foot').textContent=`Cuantitativo sobre ${DATA.meta.na}+${DATA.meta.nb} comentarios de r/politics (bots filtrados), primer trimestre. Cualitativo sobre una muestra de 20+20 leída a mano. Descriptivo, no causal; una sola comunidad; léxicos ilustrativos. Generado por arqueo.ui.`;
- show(0);
+ mount();
 }
-render();addEventListener('resize',()=>{const v=document.querySelector('.sec:not([style*="none"])');charts.forEach(c=>c.resize());});
+init();addEventListener('resize',()=>charts.forEach(c=>c.resize()));
 </script></body></html>"""
 
 

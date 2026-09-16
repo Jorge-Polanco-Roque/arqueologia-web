@@ -30,7 +30,7 @@ def main(argv=None):
 
     sub.add_parser("dashboard", help="genera data/dashboard.html (vista rápida)")
     sub.add_parser("report", help="genera data/report.html (análisis profundo)")
-    sub.add_parser("ui", help="genera data/ui.html (UI gráfica con ECharts)")
+    sub.add_parser("ui", help="genera data/ui.html (todas las comunidades, con selector)")
 
     pc = sub.add_parser("compare", help="log-odds de un corte vs otro")
     pc.add_argument("--era-a", default="2012")

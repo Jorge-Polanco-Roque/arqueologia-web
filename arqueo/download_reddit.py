@@ -13,10 +13,17 @@ from __future__ import annotations
 import json
 import os
 import time
+import socket
+import http.client
 import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
+
+# Errores transitorios de red que MERECEN reintento (no solo el 429 de la API):
+# timeouts de SSL/socket, conexión cerrada por el otro extremo, DNS temporal, etc.
+_TRANSIENT = (urllib.error.URLError, http.client.HTTPException, socket.timeout,
+              ConnectionError, TimeoutError)
 
 API = "https://arctic-shift.photon-reddit.com/api"
 
@@ -60,18 +67,34 @@ def _fetch(kind, subreddit, after, before, limit="auto"):
     return payload["data"] if isinstance(payload, dict) and "data" in payload else payload
 
 
+def _fetch_robust(kind, subreddit, after, before, tries=7):
+    """_fetch con reintentos y backoff exponencial ante fallos transitorios."""
+    for attempt in range(tries):
+        try:
+            return _fetch(kind, subreddit, after, before)
+        except urllib.error.HTTPError as e:      # subclase de URLError -> capturar antes
+            if e.code == 429:
+                time.sleep(min(int(e.headers.get("X-RateLimit-Reset", "5") or 5), 60))
+                continue
+            if (e.code == 422 or 500 <= e.code < 600) and attempt < tries - 1:
+                time.sleep(min(2 ** attempt, 30))     # 422 suele ser transitorio bajo carga
+                continue
+            raise
+        except _TRANSIENT:
+            if attempt == tries - 1:
+                raise
+            time.sleep(min(2 ** attempt, 30))     # 1,2,4,8,16,30… segundos
+    raise RuntimeError("reintentos agotados")
+
+
 def _window(kind, subreddit, after, before, max_items=None, sleep=1.0):
     """Pagina una ventana [after, before) avanzando el cursor. Genera dicts crudos."""
     seen = 0
     while True:
         try:
-            batch = _fetch(kind, subreddit, after, before)
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                wait = int(e.headers.get("X-RateLimit-Reset", "30") or 30)
-                time.sleep(min(wait, 120))
-                continue
-            raise
+            batch = _fetch_robust(kind, subreddit, after, before)
+        except urllib.error.HTTPError:
+            break            # 4xx persistente (p.ej. 422): corta esta ventana, sigue con la siguiente
         if not batch:
             break
         for obj in batch:

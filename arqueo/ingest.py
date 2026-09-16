@@ -5,7 +5,8 @@ core.write_jsonl. Empezamos con las dos elegidas: Usenet (el "antes") y Reddit
 (el "después"). Wayback/foros ES: mismo patrón, ver PLAN.md fase 1.
 """
 from __future__ import annotations
-import mailbox
+import gzip
+import email
 import email.utils
 import html
 import re
@@ -14,9 +15,26 @@ from .core import Record
 _HTML_TAG = re.compile(r"<[^>]+>")
 
 
+def _iter_mbox(path: str):
+    """Itera mensajes de un mbox (plano o .gz) por streaming, dividiendo en la
+    línea envoltorio 'From '. No carga el archivo entero -> soporta volcados de GB."""
+    op = gzip.open if path.endswith(".gz") else open
+    with op(path, "rt", encoding="latin-1", errors="replace") as f:
+        buf = None
+        for line in f:
+            if line.startswith("From "):          # delimitador de mensaje (no la cabecera 'From:')
+                if buf is not None:
+                    yield email.message_from_string("".join(buf))
+                buf = []                           # descarta la línea envoltorio
+            elif buf is not None:
+                buf.append(line)
+        if buf:
+            yield email.message_from_string("".join(buf))
+
+
 def from_usenet_mbox(path: str, lang: str = "en"):
-    """Usenet en formato mbox (dumps de archive.org, export de Google Groups)."""
-    for msg in mailbox.mbox(path):
+    """Usenet en mbox plano o .gz (dumps de archive.org / Giganews, Google Groups)."""
+    for msg in _iter_mbox(path):
         parsed = email.utils.parsedate_tz(msg.get("Date", ""))
         if not parsed:
             continue
@@ -129,10 +147,19 @@ def _selfcheck():
     mp = os.path.join(d, "u.mbox")
     with open(mp, "w") as f:
         f.write("From x\nMessage-ID: <1@x>\nFrom: bob <bob@x.net>\n"
-                "Newsgroups: comp.lang.c\nDate: Sat, 01 Jun 2002 00:00:00 +0000\n\n"
+                "Newsgroups: comp.lang.c\nDate: Fri, 01 Jun 2007 00:00:00 +0000\n\n"
                 "hello usenet\n")
     recs = list(from_usenet_mbox(mp))
-    assert len(recs) == 1 and recs[0].era == "2002" and recs[0].author == "bob@x.net", recs
+    assert len(recs) == 1 and recs[0].era == "2007" and recs[0].author == "bob@x.net", recs
+
+    gp = os.path.join(d, "u.mbox.gz")               # dos mensajes comprimidos, distinto año
+    with gzip.open(gp, "wt", encoding="latin-1") as f:
+        f.write("From x\nMessage-ID: <2@x>\nFrom: al <al@x.net>\nNewsgroups: sci.econ\n"
+                "Date: Wed, 01 Jan 2003 00:00:00 +0000\n\ninflation talk\n"
+                "From y\nMessage-ID: <3@x>\nFrom: bo <bo@x.net>\nNewsgroups: sci.econ\n"
+                "Date: Fri, 01 Jun 2007 00:00:00 +0000\n\nmore econ\n")
+    recs = list(from_usenet_mbox(gp))
+    assert len(recs) == 2 and recs[0].era is None and recs[1].era == "2007", [r.era for r in recs]
 
     hp = os.path.join(d, "hn.ndjson")
     with open(hp, "w") as f:

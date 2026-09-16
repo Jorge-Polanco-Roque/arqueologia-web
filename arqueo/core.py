@@ -9,10 +9,10 @@ import json, re, os
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 
-# Cortes "testigo de sondeo": un año por década, como capas de sedimento.
-# Diseño híbrido -> 2012/2022 = within-platform limpio (Reddit+HN);
-# 1992/2002 = pasado profundo (Usenet), capa descriptiva opcional.
-SNAPSHOTS = (1992, 2002, 2012, 2022)
+# Cortes "testigo de sondeo": capas de sedimento donde el dato existe.
+# 2007 = pasado profundo (Usenet/Giganews; 1992 y 2002 caen en costuras de archivo
+# sin bulk comparable). 2012/2022 = Reddit/HN (within-platform limpio).
+SNAPSHOTS = (2007, 2012, 2022)
 ERAS = {str(y): (y, y) for y in SNAPSHOTS}
 
 
@@ -96,13 +96,13 @@ def to_parquet(glob_pattern: str = NORMALIZED_GLOB, out: str = "data/corpus.parq
 
 
 def _selfcheck():
-    assert era_of(datetime(2002, 6, 1, tzinfo=timezone.utc)) == "2002"
+    assert era_of(datetime(2007, 6, 1, tzinfo=timezone.utc)) == "2007"
     assert era_of(datetime(2022, 6, 1, tzinfo=timezone.utc)) == "2022"
-    assert era_of(datetime(2005, 6, 1, tzinfo=timezone.utc)) is None
-    ts = int(datetime(2002, 6, 1, tzinfo=timezone.utc).timestamp())
+    assert era_of(datetime(2003, 6, 1, tzinfo=timezone.utc)) is None
+    ts = int(datetime(2007, 6, 1, tzinfo=timezone.utc).timestamp())
     r = Record(id="1", platform="usenet", community="comp.lang.c", author="bob",
                ts=ts, text="hi\n> quoted line\nthere\n-- \nsig")
-    assert r.era == "2002", r.era
+    assert r.era == "2007", r.era
     assert r.text == "hi there", repr(r.text)
     print("core OK")
 
