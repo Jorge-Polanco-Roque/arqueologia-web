@@ -1,0 +1,26 @@
+# Todo en el contenedor: descarga + ingesta + análisis. Nada toca tu Python local.
+#
+# Requisito único (solo para HN/BigQuery): credenciales ADC de gcloud en el host.
+# Una vez:   gcloud auth application-default login
+#            export GOOGLE_CLOUD_PROJECT=tu-proyecto
+# (Reddit no necesita nada: API pública sin auth.)
+#
+#   docker compose build
+#   docker compose up                                   # self-checks
+#   # descarga (dentro del contenedor):
+#   docker compose run --rm arqueo python -m arqueo.cli download reddit --subreddit politics --year 2022 --max 50000
+#   docker compose run --rm arqueo python -m arqueo.cli download hn --years 2012,2022
+#   # ingesta + comparación:
+#   docker compose run --rm arqueo python -m arqueo.cli ingest reddit data/raw/reddit/politics_2022_comments.ndjson
+#   docker compose run --rm arqueo python -m arqueo.cli compare --platform reddit --community politics --era-a 2012 --era-b 2022
+services:
+  arqueo:
+    build: .
+    working_dir: /app
+    environment:
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+    volumes:
+      - ./data:/app/data                                   # datos persistentes en el host
+      - ./arqueo:/app/arqueo                               # código en vivo, sin reconstruir
+      - ./docs:/app/docs
+      - ~/.config/gcloud:/root/.config/gcloud:ro           # ADC para BigQuery (HN); ignóralo si no usas HN

@@ -1,0 +1,9 @@
+data/
+dumps/
+*.parquet
+*.zst
+__pycache__/
+*.pyc
+.venv/
+.env
+.DS_Store

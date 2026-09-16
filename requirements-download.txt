@@ -1,0 +1,4 @@
+# Descarga dentro del contenedor.
+# Reddit usa urllib (stdlib) -> sin dependencia.
+# HN necesita el cliente de BigQuery:
+google-cloud-bigquery>=3.20

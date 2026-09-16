@@ -1,0 +1,8 @@
+data/
+dumps/
+.venv/
+__pycache__/
+*.pyc
+.git/
+*.zst
+*.parquet

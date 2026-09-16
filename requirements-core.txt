@@ -1,0 +1,4 @@
+# Capa NÚCLEO — lo único que el pipeline actual necesita para correr.
+# La capa ML/LLM (ver requirements.txt) se añade al construir la fase 4.
+duckdb>=0.10
+zstandard>=0.22

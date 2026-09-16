@@ -1,0 +1,19 @@
+# Núcleo — imprescindible, barato. El toolkit base corre solo con esto.
+duckdb>=0.10
+
+# Ingesta — solo si lees dumps comprimidos de Reddit (.zst)
+zstandard>=0.22
+
+# Capa ML a escala (opcional; import perezoso en analyze.py)
+sentence-transformers>=2.7   # embeddings locales (all-MiniLM-L6-v2)
+bertopic>=0.16               # modelado de temas (usa los embeddings)
+gensim>=4.3                  # word2vec por era -> cambio semántico diacrónico
+scikit-learn>=1.4
+scipy>=1.12                  # tests estadísticos era A vs B
+statsmodels>=0.14            # reponderación demográfica / controles de confusores
+
+# Capa matiz — LLM sobre muestras estratificadas (ideología, perspectiva, personalidad)
+anthropic>=0.40
+
+# Visualización / reporte
+plotly>=5.20
